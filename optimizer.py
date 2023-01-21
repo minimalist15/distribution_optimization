@@ -370,9 +370,11 @@ packing_list = {
 
 
 
+import itertools
+import requests
+from datetime import datetime
+
 def get_travel_info(packing_list):
-    # Create an instance of the EmissionCalculator class
-    emission_calculator = EmissionCalculator()
     event_combinations = list(itertools.combinations(packing_list['event'].keys(), 2))
     distances_and_transit_times = {}
     for event1, event2 in event_combinations:
@@ -381,8 +383,8 @@ def get_travel_info(packing_list):
             continue
         event1_coordinates = packing_list['event'][event1]['coordinates']
         event2_coordinates = packing_list['event'][event2]['coordinates']
-        event1_date = datetime.datetime.strptime(packing_list['event'][event1]['date'], '%Y-%m-%d')
-        event2_date = datetime.datetime.strptime(packing_list['event'][event2]['date'], '%Y-%m-%d')
+        event1_date = datetime.strptime(packing_list['event'][event1]['event_date'], '%Y-%m-%d')
+        event2_date = datetime.strptime(packing_list['event'][event2]['event_date'], '%Y-%m-%d')
         transit_days = (event2_date - event1_date).days
         # check if the events have the same coordinates
         if event1_coordinates != event2_coordinates and transit_days > 3:
@@ -402,23 +404,29 @@ def get_travel_info(packing_list):
             else:
                 transit_time += (transit_days - 2) * 9 + 2 # assuming truck driver can only drive 9 hours a day
             # Calculate emissions
-            emissions = emission_calculator.calculate_emissions_for_heavy_duty_vehicle(distance, transit_time)
+            emissions = distance * 2.97
             # add the emissions to the result dictionary
             distances_and_transit_times[f"{event1}-{event2}"] = {'distance': distance, 'transit_time': transit_time, 'emissions': emissions}
-    return distances_and_transit_times,
+    return distances_and_transit_times
+,
 def calculate_material_distribution(packing_list, distances_and_transit_times):
     event_materials = {}
-    for event, materials in packing_list['materials'].items():
-        event_materials[event] = sum(materials.values())
+    for event, event_data in packing_list['event'].items():
+        total = 0
+        for material in event_data['materials']:
+            total += event_data['materials'][material]['quantity']
+        event_materials[event] = total
     event_distribution = {}
-    for event1, event2 in distances_and_transit_times.keys():
-        event1_materials = event_materials.get(event1, 0)
-        event2_materials = event_materials.get(event2, 0)
-        event1_distribution = event1_materials / (event1_materials + event2_materials)
-        event2_distribution = event2_materials / (event1_materials + event2_materials)
-        event_distribution[event1] = event1_distribution
-        event_distribution[event2] = event2_distribution
-    return event_distribution,
+    for event_pair, data in distances_and_transit_times.items():
+      event1, event2 = event_pair.split("-")
+      event1_materials = event_materials.get(event1, 0)
+      event2_materials = event_materials.get(event2, 0)
+      event1_distribution = event1_materials / (event1_materials + event2_materials)
+      event2_distribution = event2_materials / (event1_materials + event2_materials)
+      event_distribution[event1] = event1_distribution
+      event_distribution[event2] = event2_distribution
+    return event_distribution
+,
 def initialize_logs():
     logs = {
         'route_distances': {},
@@ -428,8 +436,9 @@ def initialize_logs():
         'arrival_date': {},
         'emissions': {}
     }
-    return logs,
-def best_event(packing_list, events, logs):
+    return logs
+,
+def get_best_event(packing_list, events, logs):
     for event in events:
         event_materials = event['materials']
         delivery_window_start = event['date'] - timedelta(days=15)
@@ -465,8 +474,44 @@ def best_event(packing_list, events, logs):
           logs['timestamps']['end_date'] = event['date']
           print("All events have been successfully covered")
         else:
-          print("Not enough total material to cover all events"),
+          print("Not enough total material to cover all events")
+,
 def distribute_materials(packing_list, events, logs, max_distance, max_time):
+    for event in events:
+        event_materials = event['materials']
+        delivery_window_start = event['date'] - timedelta(days=15)
+        delivery_window_end = event['date'] - timedelta(days=10)
+        current_time = datetime.now()
+        # check if event is within delivery window
+        if current_time > delivery_window_start and current_time < delivery_window_end:
+            for material, quantity in event_materials.items():
+                if material in packing_list and packing_list[material] >= quantity:
+                    packing_list[material] -= quantity
+                    logs['material_allocation'][event['name']] = {material: quantity}
+                else:
+                    # check if other events have excess material
+                    excess_material = check_excess_material(events, material, quantity)
+                    if excess_material:
+                        # check if excess material is within max_distance
+                        if get_distance(excess_material['location'], event['location']) <= max_distance:
+                            # check if excess material can be delivered within max_time
+                            time_to_delivery = get_time_to_delivery(excess_material['location'], event['location'])
+                            if time_to_delivery <= max_time:
+                                allocate_excess_material(excess_material, event, logs)
+                                continue
+                    # check if possible to source from warehouse
+                    if material in packing_list and packing_list[material] > 0:
+                        # check if warehouse is within max_distance
+                        if get_distance(warehouse_location, event['location']) <= max_distance:
+                            # check if warehouse can deliver within max_time
+                            time_to_delivery = get_time_to_delivery(warehouse_location, event['location'])
+                            if time_to_delivery <= max_time:
+                                # allocate remaining material from warehouse
+                                allocate_from_warehouse(packing_list, material, quantity, event, logs)
+                                continue
+                    # not enough material in warehouse or other events
+                    print(f"Not enough {material} to cover event {event['name']}")
+                    returnterials(packing_list, events, logs, max_distance, max_time):
     for event in events:
         event_materials = event['materials']
         delivery_window_start = event['date'] - timedelta(days=15)
