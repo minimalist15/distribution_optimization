@@ -1,6 +1,8 @@
 import itertools
 import requests
 from datetime import datetime
+import os
+import imageio
 
 packing_list = {
     'event': {
@@ -367,7 +369,7 @@ packing_list = {
             }
         }}
 
-
+#gets distance of all the tuples, removes any duplicates, calculates transit times, calculates distances, calculates emissions.
 def get_travel_info(packing_list):
     event_combinations = list(itertools.combinations(packing_list['event'].keys(), 2))
     distances_and_transit_times = {}
@@ -403,24 +405,29 @@ def get_travel_info(packing_list):
             distances_and_transit_times[f"{event1}-{event2}"] = {'distance': distance, 'transit_time': transit_time, 'emissions': emissions}
     return distances_and_transit_times
 ,
+#gets the quantities for each tuple of events
 def get_quantities_per_event(packing_list, distances_and_transit_times):
     event_materials = {}
     for event, event_data in packing_list['event'].items():
-        total = 0
-        for material in event_data['materials']:
-            total += event_data['materials'][material]['quantity']
-        event_materials[event] = total
+        event_materials[event] = {}
+        for material, material_data in event_data['materials'].items():
+            event_materials[event][material] = material_data['quantity']
+
     event_distribution = {}
     for event_pair, data in distances_and_transit_times.items():
-      event1, event2 = event_pair.split("-")
-      event1_materials = event_materials.get(event1, 0)
-      event2_materials = event_materials.get(event2, 0)
-      event1_distribution = event1_materials / (event1_materials + event2_materials)
-      event2_distribution = event2_materials / (event1_materials + event2_materials)
-      event_distribution[event1] = event1_distribution
-      event_distribution[event2] = event2_distribution
+        event1, event2 = event_pair.split("-")
+        event1_materials = event_materials.get(event1, 0)
+        event2_materials = event_materials.get(event2, 0)
+        event1_distribution = {}
+        event2_distribution = {}
+        for material in event1_materials:
+            event1_distribution[material] = event1_materials[material] / (event1_materials[material] + event2_materials.get(material, 0))
+            event2_distribution[material] = event2_materials.get(material, 0) / (event1_materials[material] + event2_materials.get(material, 0))
+        event_distribution[event1] = event1_distribution
+        event_distribution[event2] = event2_distribution
     return event_distribution
 ,
+#insert the above fetched data into a log for tracking purpouses
 def initialize_logs():
     logs = {
         'route_distances': {},
@@ -489,3 +496,51 @@ def distribute_materials(packing_list, events, logs, max_distance=None, max_time
         print("All events have been successfully covered")
     else:
         print("Not enough total material to cover all events")
+,
+#storing images
+def generate_distribution_plan(packing_list, filename):
+    best_plan = distribute_materials(packing_list)
+    with open(filename, 'w') as file:
+        # Write the header
+        file.write("Best Distribution Plan\n\n")
+        # Write the events information
+        file.write("Events:\n")
+        events = sorted(packing_list['event'].items(), key=lambda x: x[1]['event_date'])
+        for event_name, event_info in events:
+            event_date = event_info['event_date']
+            event_coordinates = event_info['coordinates']
+            event_materials = event_info['materials']
+
+            file.write(f" - Event: {event_name}\n")
+            file.write(f"   Date: {event_date}\n")
+            file.write(f"   Coordinates: {event_coordinates}\n")
+            file.write("   Materials:\n")
+
+            for material_name, material_info in event_materials.items():
+                quantity = material_info['quantity']
+                length = material_info['length']
+                width = material_info['width']
+                height = material_info['height']
+                weight = material_info['weight']
+
+                file.write(f"    - {material_name}\n")
+                file.write(f"      Quantity: {quantity}\n")
+                file.write(f"      Length: {length}\n")
+                file.write(f"      Width: {width}\n")
+                file.write(f"      Height: {height}\n")
+                file.write(f"      Weight: {weight}\n")
+
+                # Get the routing image from the Bing Maps API
+                api_key = 'AnHQFhGPMT1HY3GFaRxegUsta7C81GqDAA8u5LFGZxeGd0iZM1Vz6cj2HUYQ1xTq'
+                origin = best_plan.material_sources[material_name]
+                destination = event_coordinates
+                image_url = f'http://dev.virtualearth.net/REST/v1/Imagery/Map/Road/{origin};{destination}/15?mapSize=800,600&key={api_key}'
+                image_data = requests.get(image_url).content
+                # Save the image to a file
+                event_folder = f'{event_name}'
+                os.makedirs(event_folder, exist_ok=True)
+                image_path = os.path.join(event_folder, f'{material_name}_route.jpg')
+                with open(image_path, 'wb') as image_file:
+                    image_file.write(image_data)
+                # Insert the image into the text file
+
