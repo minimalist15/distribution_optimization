@@ -1,7 +1,6 @@
 import itertools
 import requests
-from datetime import datetime, timedelta
-from PyEmission import EmissionCalculator
+from datetime import datetime
 
 packing_list = {
     'event': {
@@ -369,11 +368,6 @@ packing_list = {
         }}
 
 
-
-import itertools
-import requests
-from datetime import datetime
-
 def get_travel_info(packing_list):
     event_combinations = list(itertools.combinations(packing_list['event'].keys(), 2))
     distances_and_transit_times = {}
@@ -409,7 +403,7 @@ def get_travel_info(packing_list):
             distances_and_transit_times[f"{event1}-{event2}"] = {'distance': distance, 'transit_time': transit_time, 'emissions': emissions}
     return distances_and_transit_times
 ,
-def calculate_material_distribution(packing_list, distances_and_transit_times):
+def get_quantities_per_event(packing_list, distances_and_transit_times):
     event_materials = {}
     for event, event_data in packing_list['event'].items():
         total = 0
@@ -438,7 +432,15 @@ def initialize_logs():
     }
     return logs
 ,
-def get_best_event(packing_list, events, logs):
+def populate_logs_with_starting_data():
+    warehouse_materials = sum(packing_list['Warehouse']['materials'].values())
+    logs['Warehouse'] = {'materials': warehouse_materials}
+    for event in events:
+        event_materials = sum(packing_list['event'][event]['materials'].values())
+        logs[event] = {'materials_needed': event_materials}
+    return logs
+,
+def distribute_materials(packing_list, events, logs, max_distance=None, max_time=None):
     for event in events:
         event_materials = event['materials']
         delivery_window_start = event['date'] - timedelta(days=15)
@@ -455,95 +457,35 @@ def get_best_event(packing_list, events, logs):
                     # check if other events have excess material
                     excess_material = check_excess_material(events, material, quantity)
                     if excess_material:
-                        allocate_excess_material(excess_material, event, logs)
-                    else:
-                        # check if possible to source from warehouse
-                        if material in packing_list and packing_list[material] > 0:
-                            # allocate remaining material from warehouse
-                            allocate_from_warehouse(packing_list, material, quantity, event, logs)
+                        if max_distance and max_time:
+                            # check if excess material is within max_distance and can be delivered within max_time
+                            if get_distance(excess_material['location'], event['location']) <= max_distance and get_time_to_delivery(excess_material['location'], event['location']) <= max_time:
+                                allocate_excess_material(excess_material, event, logs)
+                                continue
                         else:
-                            # not enough material in warehouse
-                            print(f"Not enough {material} to cover event {event['name']}")
-                            return
+                            allocate_excess_material(excess_material, event, logs)
+                    # check if possible to source from warehouse
+                    elif material in packing_list and packing_list[material] > 0:
+                        if max_distance:
+                            # check if warehouse is within max_distance
+                            if get_distance(warehouse_location, event['location']) <= max_distance:
+                                allocate_from_warehouse(packing_list, material, quantity, event, logs)
+                            else:
+                                # warehouse not within max_distance
+                                print(f"Warehouse not within max distance for event {event['name']}")
+                                return
+                        else:
+                            allocate_from_warehouse(packing_list, material, quantity, event, logs)
+                    else:
+                        # not enough material in warehouse
+                        print(f"Not enough {material} to cover event {event['name']}")
+                        return
         else:
             print(f"Event {event['name']} is not within the delivery window.")
             continue
-
     # check if all events have been covered successfully
-        if check_events_covered(events, logs):
-          logs['timestamps']['end_date'] = event['date']
-          print("All events have been successfully covered")
-        else:
-          print("Not enough total material to cover all events")
-,
-def distribute_materials(packing_list, events, logs, max_distance, max_time):
-    for event in events:
-        event_materials = event['materials']
-        delivery_window_start = event['date'] - timedelta(days=15)
-        delivery_window_end = event['date'] - timedelta(days=10)
-        current_time = datetime.now()
-        # check if event is within delivery window
-        if current_time > delivery_window_start and current_time < delivery_window_end:
-            for material, quantity in event_materials.items():
-                if material in packing_list and packing_list[material] >= quantity:
-                    packing_list[material] -= quantity
-                    logs['material_allocation'][event['name']] = {material: quantity}
-                else:
-                    # check if other events have excess material
-                    excess_material = check_excess_material(events, material, quantity)
-                    if excess_material:
-                        # check if excess material is within max_distance
-                        if get_distance(excess_material['location'], event['location']) <= max_distance:
-                            # check if excess material can be delivered within max_time
-                            time_to_delivery = get_time_to_delivery(excess_material['location'], event['location'])
-                            if time_to_delivery <= max_time:
-                                allocate_excess_material(excess_material, event, logs)
-                                continue
-                    # check if possible to source from warehouse
-                    if material in packing_list and packing_list[material] > 0:
-                        # check if warehouse is within max_distance
-                        if get_distance(warehouse_location, event['location']) <= max_distance:
-                            # check if warehouse can deliver within max_time
-                            time_to_delivery = get_time_to_delivery(warehouse_location, event['location'])
-                            if time_to_delivery <= max_time:
-                                # allocate remaining material from warehouse
-                                allocate_from_warehouse(packing_list, material, quantity, event, logs)
-                                continue
-                    # not enough material in warehouse or other events
-                    print(f"Not enough {material} to cover event {event['name']}")
-                    returnterials(packing_list, events, logs, max_distance, max_time):
-    for event in events:
-        event_materials = event['materials']
-        delivery_window_start = event['date'] - timedelta(days=15)
-        delivery_window_end = event['date'] - timedelta(days=10)
-        current_time = datetime.now()
-        # check if event is within delivery window
-        if current_time > delivery_window_start and current_time < delivery_window_end:
-            for material, quantity in event_materials.items():
-                if material in packing_list and packing_list[material] >= quantity:
-                    packing_list[material] -= quantity
-                    logs['material_allocation'][event['name']] = {material: quantity}
-                else:
-                    # check if other events have excess material
-                    excess_material = check_excess_material(events, material, quantity)
-                    if excess_material:
-                        # check if excess material is within max_distance
-                        if get_distance(excess_material['location'], event['location']) <= max_distance:
-                            # check if excess material can be delivered within max_time
-                            time_to_delivery = get_time_to_delivery(excess_material['location'], event['location'])
-                            if time_to_delivery <= max_time:
-                                allocate_excess_material(excess_material, event, logs)
-                                continue
-                    # check if possible to source from warehouse
-                    if material in packing_list and packing_list[material] > 0:
-                        # check if warehouse is within max_distance
-                        if get_distance(warehouse_location, event['location']) <= max_distance:
-                            # check if warehouse can deliver within max_time
-                            time_to_delivery = get_time_to_delivery(warehouse_location, event['location'])
-                            if time_to_delivery <= max_time:
-                                # allocate remaining material from warehouse
-                                allocate_from_warehouse(packing_list, material, quantity, event, logs)
-                                continue
-                    # not enough material in warehouse or other events
-                    print(f"Not enough {material} to cover event {event['name']}")
-                    return
+    if check_events_covered(events, logs):
+        logs['timestamps']['end_date'] = event['date']
+        print("All events have been successfully covered")
+    else:
+        print("Not enough total material to cover all events")
